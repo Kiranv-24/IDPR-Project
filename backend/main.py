@@ -39,8 +39,8 @@ ROBOFLOW_CONFIG = {
         'api_key': 'EcJhVnWcabDRAj2MdLlD',
     },
     4: {  # Lane 4 (same as Lane 1 for now)
-        'model_url': 'https://detect.roboflow.com/idp-qwteg/2',
-        'api_key': 'ExruF1SjptGtjyzU1rAc',
+        'model_url': 'https://detect.roboflow.com/my-first-project-zx0el/1',
+        'api_key': 'ckQZ0vm1NHyF5mzEt0wB',
     },
 }
 

@@ -20,12 +20,13 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-
 interface WebcamCaptureProps {
   onDetectionUpdate: (predictions: Detection[]) => void;
   onStatusChange: (isActive: boolean) => void;
   cameraId?: number;
   deviceId?: string;
+  showControls?: boolean;
+  initialDetectionActive?: boolean;
 }
 
 const API_BASE_URL = "http://localhost:8000";
@@ -48,15 +49,20 @@ export const WebcamCapture = ({
   onStatusChange,
   cameraId = 1,
   deviceId: propDeviceId = "",
+  showControls = true,
+  initialDetectionActive = false,
 }: WebcamCaptureProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string>("");
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [detectionInterval, setDetectionInterval] = useState<NodeJS.Timeout | null>(null);
+  const [detectionInterval, setDetectionInterval] =
+    useState<NodeJS.Timeout | null>(null);
   // Local detection state per camera/component
-  const [detectionActive, setDetectionActive] = useState(false);
+  const [detectionActive, setDetectionActive] = useState(
+    initialDetectionActive
+  );
   const [apiConnected, setApiConnected] = useState(false);
   const [isCheckingApi, setIsCheckingApi] = useState(false);
 
@@ -85,6 +91,41 @@ export const WebcamCapture = ({
     }
   }, [propDeviceId]);
 
+  // Load persisted camera selection
+  useEffect(() => {
+    const savedCameraId = localStorage.getItem(`camera-${cameraId}-device`);
+    if (savedCameraId && !selectedCameraId) {
+      setSelectedCameraId(savedCameraId);
+      console.log(
+        `Camera ${cameraId}: Loaded saved camera device:`,
+        savedCameraId
+      );
+    }
+  }, [cameraId, selectedCameraId]);
+
+  // Save camera selection when it changes
+  useEffect(() => {
+    if (selectedCameraId) {
+      localStorage.setItem(`camera-${cameraId}-device`, selectedCameraId);
+      console.log(`Camera ${cameraId}: Saved camera device:`, selectedCameraId);
+    }
+  }, [selectedCameraId, cameraId]);
+
+  // Set detection state based on props
+  useEffect(() => {
+    // In User Mode (showControls = false), always start detection
+    if (!showControls) {
+      console.log(`Camera ${cameraId}: Setting detection active for User Mode`);
+      setDetectionActive(true);
+    } else {
+      // In Developer Mode, use initialDetectionActive prop
+      console.log(
+        `Camera ${cameraId}: Setting detection active for Developer Mode:`,
+        initialDetectionActive
+      );
+      setDetectionActive(initialDetectionActive);
+    }
+  }, [showControls, initialDetectionActive, cameraId]);
 
   // Handle local detection state changes
   useEffect(() => {
@@ -94,6 +135,31 @@ export const WebcamCapture = ({
       stopWebcam();
     }
   }, [detectionActive]);
+
+  // Fallback: Try to start camera again if not streaming after a delay
+  useEffect(() => {
+    if (detectionActive && !isStreaming && !showControls) {
+      const timer = setTimeout(() => {
+        console.log(
+          `Camera ${cameraId}: Fallback - trying to start webcam again`
+        );
+        startWebcam();
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [detectionActive, isStreaming, showControls, cameraId]);
+
+  // Ensure video plays when stream is set
+  useEffect(() => {
+    if (stream && videoRef.current && !videoRef.current.playing) {
+      videoRef.current.play().catch((err) => {
+        console.error(
+          `Camera ${cameraId}: Error playing video after stream set:`,
+          err
+        );
+      });
+    }
+  }, [stream, cameraId]);
 
   // Get available cameras on component mount
   useEffect(() => {
@@ -168,14 +234,58 @@ export const WebcamCapture = ({
   };
 
   const startWebcam = async () => {
-    if (!apiConnected) {
+    console.log(
+      `Camera ${cameraId}: Starting webcam, showControls:`,
+      showControls,
+      "apiConnected:",
+      apiConnected
+    );
+
+    // In User Mode, start even without API connection
+    if (!apiConnected && showControls) {
       setError(
         "Please ensure the backend API is running before starting detection"
       );
       return;
     }
 
-    if (!selectedCameraId) {
+    // In User Mode, try to get any available camera if none selected
+    let cameraToUse = selectedCameraId;
+    if (!selectedCameraId && !showControls) {
+      try {
+        console.log(
+          `Camera ${cameraId}: No camera selected, trying to get available cameras`
+        );
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoDevices = devices.filter(
+          (device) => device.kind === "videoinput"
+        );
+        console.log(
+          `Camera ${cameraId}: Found ${videoDevices.length} video devices`
+        );
+        if (videoDevices.length > 0) {
+          // Assign different cameras based on cameraId - ensure unique assignment
+          const cameraIndex = Math.min(cameraId - 1, videoDevices.length - 1);
+          cameraToUse = videoDevices[cameraIndex].deviceId;
+          setSelectedCameraId(videoDevices[cameraIndex].deviceId);
+          console.log(
+            `Camera ${cameraId}: Selected camera ${cameraIndex + 1}/${
+              videoDevices.length
+            }:`,
+            videoDevices[cameraIndex].label || `Camera ${cameraIndex + 1}`
+          );
+        } else {
+          setError("No cameras available");
+          return;
+        }
+      } catch (err) {
+        console.error(`Camera ${cameraId}: Error getting cameras:`, err);
+        setError("Failed to access cameras");
+        return;
+      }
+    }
+
+    if (!cameraToUse) {
       setError("Please select a camera first");
       return;
     }
@@ -183,7 +293,7 @@ export const WebcamCapture = ({
     try {
       const constraints = {
         video: {
-          deviceId: { exact: selectedCameraId },
+          deviceId: { exact: cameraToUse },
           width: { ideal: 640 },
           height: { ideal: 480 },
           frameRate: { ideal: 24 },
@@ -196,13 +306,17 @@ export const WebcamCapture = ({
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        videoRef.current.play();
+        videoRef.current.play().catch((err) => {
+          console.error(`Camera ${cameraId}: Error playing video:`, err);
+        });
+        console.log(`Camera ${cameraId}: Video element updated with stream`);
       }
 
       setStream(mediaStream);
       setIsStreaming(true);
       onStatusChange(true);
       setError("");
+      console.log(`Camera ${cameraId}: Webcam started successfully`);
 
       // Increase detection interval to 2000ms (2 seconds) for stability
       // const interval = setInterval(performDetection, 1000);
@@ -292,7 +406,12 @@ export const WebcamCapture = ({
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageData = canvas.toDataURL("image/jpeg", 0.4);
       // Debug log to confirm sending
-      console.log("[WebcamCapture] Sending detection frame", { cameraId, wsConnected, isStreaming, detectionActive });
+      console.log("[WebcamCapture] Sending detection frame", {
+        cameraId,
+        wsConnected,
+        isStreaming,
+        detectionActive,
+      });
       wsRef.current.send(
         JSON.stringify({
           image: imageData,
@@ -412,141 +531,159 @@ export const WebcamCapture = ({
 
   return (
     <div className="space-y-4">
-      <Alert
-        className={`${
-          apiConnected
-            ? "bg-green-900/50 border-green-500"
-            : "bg-red-900/50 border-red-500"
-        }`}
-      >
-        {apiConnected ? (
-          <Wifi className="h-4 w-4" />
-        ) : (
-          <WifiOff className="h-4 w-4" />
-        )}
-        <AlertDescription className="text-white flex items-center justify-between">
-          <span>
-            Backend API: {apiConnected ? "Connected" : "Disconnected"}
-          </span>
-        </AlertDescription>
-      </Alert>
+      {showControls && (
+        <>
+          <Alert
+            className={`${
+              apiConnected
+                ? "bg-green-900/50 border-green-500"
+                : "bg-red-900/50 border-red-500"
+            }`}
+          >
+            {apiConnected ? (
+              <Wifi className="h-4 w-4" />
+            ) : (
+              <WifiOff className="h-4 w-4" />
+            )}
+            <AlertDescription className="text-white flex items-center justify-between">
+              <span>
+                Backend API: {apiConnected ? "Connected" : "Disconnected"}
+              </span>
+            </AlertDescription>
+          </Alert>
 
-      {error && (
-        <Alert className="bg-red-900/50 border-red-500">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription className="text-white">{error}</AlertDescription>
-        </Alert>
+          {error && (
+            <Alert className="bg-red-900/50 border-red-500">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription className="text-white">
+                {error}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <Card className="bg-black/40 backdrop-blur-md border-white/20">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center">
+                <Camera className="h-5 w-5 mr-2" />
+                Camera Selection
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div>
+                <label className="text-white text-sm mb-2 block">
+                  Select Camera:
+                </label>
+                <Select
+                  value={selectedCameraId}
+                  onValueChange={handleCameraChange}
+                  // Camera selection is always enabled
+                >
+                  <SelectTrigger className="bg-white/10 border-white/20 text-white">
+                    <SelectValue placeholder="Choose a camera..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableCameras.map((camera, index) => (
+                      <SelectItem key={camera.deviceId} value={camera.deviceId}>
+                        {camera.label || `Camera ${index + 1}`}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardContent>
+          </Card>
+        </>
       )}
 
-      <Card className="bg-black/40 backdrop-blur-md border-white/20">
-        <CardHeader>
-          <CardTitle className="text-white flex items-center">
-            <Camera className="h-5 w-5 mr-2" />
-            Camera Selection
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div>
-            <label className="text-white text-sm mb-2 block">
-              Select Camera:
-            </label>
-            <Select
-              value={selectedCameraId}
-              onValueChange={handleCameraChange}
-              // Camera selection is always enabled
-            >
-              <SelectTrigger className="bg-white/10 border-white/20 text-white">
-                <SelectValue placeholder="Choose a camera..." />
-              </SelectTrigger>
-              <SelectContent>
-                {availableCameras.map((camera, index) => (
-                  <SelectItem key={camera.deviceId} value={camera.deviceId}>
-                    {camera.label || `Camera ${index + 1}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardContent>
-      </Card>
+      {showControls && (
+        <>
+          <Card className="bg-black/40 backdrop-blur-md border-white/20">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center">
+                <Settings className="h-5 w-5 mr-2" />
+                Detection Parameters
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-white text-sm mb-2 block">
+                  Confidence Threshold: {Math.round(confidenceThreshold * 100)}%
+                </label>
+                <Slider
+                  value={[confidenceThreshold]}
+                  onValueChange={(value) => setConfidenceThreshold(value[0])}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                />
+              </div>
+              <div>
+                <label className="text-white text-sm mb-2 block">
+                  Overlap Threshold: {Math.round(overlapThreshold * 100)}%
+                </label>
+                <Slider
+                  value={[overlapThreshold]}
+                  onValueChange={(value) => setOverlapThreshold(value[0])}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                />
+              </div>
+              <div>
+                <label className="text-white text-sm mb-2 block">
+                  Opacity Threshold: {Math.round(opacityThreshold * 100)}%
+                </label>
+                <Slider
+                  value={[opacityThreshold]}
+                  onValueChange={(value) => setOpacityThreshold(value[0])}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                />
+              </div>
+              <div>
+                <label className="text-white text-sm mb-2 block">
+                  Label Display Mode:
+                </label>
+                <Select
+                  value={labelDisplayMode}
+                  onValueChange={setLabelDisplayMode}
+                >
+                  <SelectTrigger className="bg-white/10 border-white/20 text-white">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Draw Confidence">
+                      Draw Confidence
+                    </SelectItem>
+                    <SelectItem value="Class Only">Class Only</SelectItem>
+                    <SelectItem value="Hidden">Hidden</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {processingTime > 0 && (
+                <div className="text-purple-200 text-sm">
+                  Processing Time: {(processingTime * 1000).toFixed(1)}ms
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
 
-      <Card className="bg-black/40 backdrop-blur-md border-white/20">
-        <CardHeader>
-          <CardTitle className="text-white flex items-center">
-            <Settings className="h-5 w-5 mr-2" />
-            Detection Parameters
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div>
-            <label className="text-white text-sm mb-2 block">
-              Confidence Threshold: {Math.round(confidenceThreshold * 100)}%
-            </label>
-            <Slider
-              value={[confidenceThreshold]}
-              onValueChange={(value) => setConfidenceThreshold(value[0])}
-              min={0}
-              max={1}
-              step={0.01}
-            />
-          </div>
-          <div>
-            <label className="text-white text-sm mb-2 block">
-              Overlap Threshold: {Math.round(overlapThreshold * 100)}%
-            </label>
-            <Slider
-              value={[overlapThreshold]}
-              onValueChange={(value) => setOverlapThreshold(value[0])}
-              min={0}
-              max={1}
-              step={0.01}
-            />
-          </div>
-          <div>
-            <label className="text-white text-sm mb-2 block">
-              Opacity Threshold: {Math.round(opacityThreshold * 100)}%
-            </label>
-            <Slider
-              value={[opacityThreshold]}
-              onValueChange={(value) => setOpacityThreshold(value[0])}
-              min={0}
-              max={1}
-              step={0.01}
-            />
-          </div>
-          <div>
-            <label className="text-white text-sm mb-2 block">
-              Label Display Mode:
-            </label>
-            <Select
-              value={labelDisplayMode}
-              onValueChange={setLabelDisplayMode}
-            >
-              <SelectTrigger className="bg-white/10 border-white/20 text-white">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="Draw Confidence">Draw Confidence</SelectItem>
-                <SelectItem value="Class Only">Class Only</SelectItem>
-                <SelectItem value="Hidden">Hidden</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {processingTime > 0 && (
-            <div className="text-purple-200 text-sm">
-              Processing Time: {(processingTime * 1000).toFixed(1)}ms
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-
-      <div className="relative bg-black rounded-lg overflow-hidden">
+      <div
+        className={`relative bg-black rounded-lg overflow-hidden ${
+          !showControls ? "h-full" : ""
+        }`}
+      >
         <video
           ref={videoRef}
-          className="w-full h-auto max-h-[400px] object-cover"
+          className={`w-full object-cover ${
+            showControls ? "h-auto max-h-[400px]" : "h-full"
+          }`}
           muted
           playsInline
+          autoPlay
         />
         <canvas
           ref={canvasRef}
@@ -566,23 +703,28 @@ export const WebcamCapture = ({
         )}
       </div>
 
-      <div className="flex gap-2">
-        {!detectionActive ? (
-          <Button
-            onClick={() => setDetectionActive(true)}
-            className="bg-green-600 hover:bg-green-700"
-            disabled={!apiConnected || !selectedCameraId}
-          >
-            <Play className="h-4 w-4 mr-2" />
-            Start Detection
-          </Button>
-        ) : (
-          <Button onClick={() => setDetectionActive(false)} variant="destructive">
-            <Square className="h-4 w-4 mr-2" />
-            Stop Detection
-          </Button>
-        )}
-      </div>
+      {showControls && (
+        <div className="flex gap-2">
+          {!detectionActive ? (
+            <Button
+              onClick={() => setDetectionActive(true)}
+              className="bg-green-600 hover:bg-green-700"
+              disabled={!apiConnected || !selectedCameraId}
+            >
+              <Play className="h-4 w-4 mr-2" />
+              Start Detection
+            </Button>
+          ) : (
+            <Button
+              onClick={() => setDetectionActive(false)}
+              variant="destructive"
+            >
+              <Square className="h-4 w-4 mr-2" />
+              Stop Detection
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 };

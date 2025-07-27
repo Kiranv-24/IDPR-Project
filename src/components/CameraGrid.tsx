@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { WebcamCapture } from "./WebcamCapture";
 import { ArduinoController } from "./ArduinoController";
 import {
@@ -13,8 +14,10 @@ import {
   Play,
   Square,
   AlertTriangle,
+  Settings,
+  Eye,
+  EyeOff,
 } from "lucide-react";
-
 
 interface Detection {
   class: string;
@@ -43,6 +46,28 @@ export const CameraGrid = () => {
   const [fullscreenCamera, setFullscreenCamera] = useState<number | null>(null);
   // Remove global detection state, detection is now per camera/component
   const [arduinoConnected, setArduinoConnected] = useState(false);
+  const [isDeveloperMode, setIsDeveloperMode] = useState(true);
+
+  // Reset view mode when switching to User Mode
+  useEffect(() => {
+    if (!isDeveloperMode && viewMode === "single") {
+      setViewMode("grid");
+      setFullscreenCamera(null);
+    }
+  }, [isDeveloperMode, viewMode]);
+
+  // Simple mode switching - don't interfere with camera state
+  useEffect(() => {
+    if (!isDeveloperMode) {
+      // In User Mode, just ensure cameras are marked as active
+      setCameras((prev) =>
+        prev.map((camera) => ({
+          ...camera,
+          isActive: true,
+        }))
+      );
+    }
+  }, [isDeveloperMode]);
   const [cameras, setCameras] = useState<CameraData[]>([
     {
       id: 1,
@@ -247,139 +272,193 @@ export const CameraGrid = () => {
 
   return (
     <div className="space-y-4">
-      {/* Arduino Controller */}
-      <ArduinoController onConnectionChange={setArduinoConnected} />
-
-      {/* Control Panel */}
-      <Card className="bg-black/40 backdrop-blur-md border-white/20">
-        <CardHeader>
-          <CardTitle className="text-white flex items-center justify-between">
-            <div className="flex items-center">
-              <Monitor className="h-5 w-5 mr-2" />
-              Traffic Management Control Panel
-              {arduinoConnected && (
-                <Badge className="ml-2 bg-green-600 text-white">
-                  Hardware Connected
-                </Badge>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={() => {
-                  setViewMode("grid");
-                  setFullscreenCamera(null);
-                }}
-                variant={viewMode === "grid" ? "default" : "outline"}
-                size="sm"
-                className="bg-white/10 border-white/20 text-white hover:bg-white/20"
-              >
-                <Grid3X3 className="h-4 w-4 mr-1" />
-                Grid View
-              </Button>
-              {[1, 2, 3, 4].map((num) => (
-                <Button
-                  key={num}
-                  onClick={() => switchToCamera(num)}
-                  variant={fullscreenCamera === num ? "default" : "outline"}
-                  size="sm"
-                  className="bg-white/10 border-white/20 text-white hover:bg-white/20"
-                >
-                  Lane {num}
-                </Button>
-              ))}
-            </div>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between">
-            <div className="text-sm text-purple-200 space-y-1">
-              {emergencyLanes.length > 0 ? (
-                <div className="flex items-center text-red-400">
-                  <AlertTriangle className="h-4 w-4 mr-2" />
-                  <span>
-                    EMERGENCY OVERRIDE ACTIVE - Lane(s):{" "}
-                    {emergencyLanes.map((lane) => lane.name).join(", ")}
-                  </span>
-                </div>
-              ) : activeCameraCount > 0 ? (
-                <span>
-                  Normal Traffic Mode -{" "}
-                  {highestTrafficCamera
-                    ? `Highest Traffic: ${highestTrafficCamera.name} (${highestTrafficCamera.trafficCount} vehicles)`
-                    : "Monitoring Traffic..."}
+      {/* Mode Toggle - Minimal for User Mode */}
+      <div className="flex justify-end">
+        <Card className="bg-black/40 backdrop-blur-md border-white/20">
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-3">
+              <div className="flex items-center space-x-2">
+                {isDeveloperMode ? (
+                  <Settings className="h-4 w-4 text-blue-400" />
+                ) : (
+                  <Eye className="h-4 w-4 text-green-400" />
+                )}
+                <span className="text-white text-sm font-medium">
+                  {isDeveloperMode ? "Developer Mode" : "User Mode"}
                 </span>
-              ) : (
-                <span>
-                  All Cameras Stopped - Ready to Start Traffic Management
-                </span>
-              )}
-              {arduinoConnected && (
-                <div className="text-green-400">
-                  🔌 Arduino hardware controlling physical traffic lights
-                </div>
-              )}
+              </div>
+              <Switch
+                checked={isDeveloperMode}
+                onCheckedChange={setIsDeveloperMode}
+                className="data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-green-600"
+              />
             </div>
-            <div className="flex items-center gap-4">
-              <Badge variant="secondary" className="bg-purple-600 text-white">
-                Active: {activeCameraCount}/4
-              </Badge>
-              {/* Remove Start/Stop All Cameras button, detection is per camera */}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Traffic Signal Status */}
-      <Card className="bg-black/40 backdrop-blur-md border-white/20">
-        <CardHeader>
-          <CardTitle className="text-white text-sm">
-            Traffic Light Status{" "}
-            {arduinoConnected
-              ? "(Hardware Controlled)"
-              : "(Software Simulation)"}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-4 gap-4">
-            {cameras.map((camera) => {
-              const signalColor = getTrafficSignalColor(camera);
-              const isGreen = signalColor.includes("green");
+      {/* Developer Mode Content */}
+      {isDeveloperMode && (
+        <>
+          {/* Arduino Controller - Only show in Developer Mode */}
+          <ArduinoController onConnectionChange={setArduinoConnected} />
 
-              return (
-                <div key={camera.id} className="flex items-center space-x-2">
-                  <div
-                    className={`w-4 h-4 rounded-full ${
-                      isGreen ? "bg-green-500" : "bg-red-500"
-                    } ${!camera.isActive ? "opacity-50" : ""}`}
-                  ></div>
-                  <span
-                    className={`text-white text-xs ${
-                      !camera.isActive ? "opacity-50" : ""
-                    }`}
-                  >
-                    {camera.name} {isGreen ? "🟢" : "🔴"}
-                  </span>
-                  {camera.hasEmergencyVehicle && (
-                    <AlertTriangle className="h-3 w-3 text-red-400" />
+          {/* Control Panel */}
+          <Card className="bg-black/40 backdrop-blur-md border-white/20">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center justify-between">
+                <div className="flex items-center">
+                  <Monitor className="h-5 w-5 mr-2" />
+                  Traffic Management Control Panel
+                  {arduinoConnected && (
+                    <Badge className="ml-2 bg-green-600 text-white">
+                      Hardware Connected
+                    </Badge>
                   )}
                 </div>
-              );
-            })}
-          </div>
-          {emergencyLanes.length > 0 && (
-            <div className="mt-2 p-2 bg-red-900/30 rounded border border-red-500">
-              <div className="text-red-400 text-xs font-bold">
-                🚨 EMERGENCY VEHICLE DETECTED:{" "}
-                {emergencyLanes.map((lane) => lane.name).join(", ")} - PRIORITY
-                OVERRIDE ACTIVE
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => {
+                      setViewMode("grid");
+                      setFullscreenCamera(null);
+                    }}
+                    variant={viewMode === "grid" ? "default" : "outline"}
+                    size="sm"
+                    className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+                  >
+                    <Grid3X3 className="h-4 w-4 mr-1" />
+                    Grid View
+                  </Button>
+                  {[1, 2, 3, 4].map((num) => (
+                    <Button
+                      key={num}
+                      onClick={() => switchToCamera(num)}
+                      variant={fullscreenCamera === num ? "default" : "outline"}
+                      size="sm"
+                      className="bg-white/10 border-white/20 text-white hover:bg-white/20"
+                    >
+                      Lane {num}
+                    </Button>
+                  ))}
+                </div>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div className="text-sm text-purple-200 space-y-1">
+                  {emergencyLanes.length > 0 ? (
+                    <div className="flex items-center text-red-400">
+                      <AlertTriangle className="h-4 w-4 mr-2" />
+                      <span>
+                        EMERGENCY OVERRIDE ACTIVE - Lane(s):{" "}
+                        {emergencyLanes.map((lane) => lane.name).join(", ")}
+                      </span>
+                    </div>
+                  ) : activeCameraCount > 0 ? (
+                    <span>
+                      Normal Traffic Mode -{" "}
+                      {highestTrafficCamera
+                        ? `Highest Traffic: ${highestTrafficCamera.name} (${highestTrafficCamera.trafficCount} vehicles)`
+                        : "Monitoring Traffic..."}
+                    </span>
+                  ) : (
+                    <span>
+                      All Cameras Stopped - Ready to Start Traffic Management
+                    </span>
+                  )}
+                  {arduinoConnected && (
+                    <div className="text-green-400">
+                      🔌 Arduino hardware controlling physical traffic lights
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-4">
+                  <Badge
+                    variant="secondary"
+                    className="bg-purple-600 text-white"
+                  >
+                    Active: {activeCameraCount}/4
+                  </Badge>
+                </div>
               </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
 
-      {/* Camera Display */}
-      {viewMode === "single" && fullscreenCamera ? (
+          {/* Traffic Signal Status */}
+          <Card className="bg-black/40 backdrop-blur-md border-white/20">
+            <CardHeader>
+              <CardTitle className="text-white text-sm">
+                Traffic Light Status
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-4 gap-4">
+                {cameras.map((camera) => {
+                  const signalColor = getTrafficSignalColor(camera);
+                  const isGreen = signalColor.includes("green");
+
+                  return (
+                    <div
+                      key={camera.id}
+                      className="flex items-center space-x-2"
+                    >
+                      <div
+                        className={`w-4 h-4 rounded-full ${
+                          isGreen ? "bg-green-500" : "bg-red-500"
+                        } ${!camera.isActive ? "opacity-50" : ""}`}
+                      ></div>
+                      <span
+                        className={`text-white text-xs ${
+                          !camera.isActive ? "opacity-50" : ""
+                        }`}
+                      >
+                        {camera.name} {isGreen ? "🟢" : "🔴"}
+                      </span>
+                      {camera.hasEmergencyVehicle && (
+                        <AlertTriangle className="h-3 w-3 text-red-400" />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {emergencyLanes.length > 0 && (
+                <div className="mt-2 p-2 bg-red-900/30 rounded border border-red-500">
+                  <div className="text-red-400 text-xs font-bold">
+                    🚨 EMERGENCY VEHICLE DETECTED:{" "}
+                    {emergencyLanes.map((lane) => lane.name).join(", ")} -
+                    PRIORITY OVERRIDE ACTIVE
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* User Mode Content - Just cameras, no text or separation lines */}
+      {!isDeveloperMode && (
+        <div className="grid grid-cols-2 gap-4">
+          {cameras.map((camera) => (
+            <div key={`camera-${camera.id}`} className="relative w-full h-full">
+              <WebcamCapture
+                key={`webcam-${camera.id}`}
+                cameraId={camera.id}
+                onDetectionUpdate={(predictions) =>
+                  handleDetectionUpdate(camera.id, predictions)
+                }
+                onStatusChange={(isActive) =>
+                  handleStatusChange(camera.id, isActive)
+                }
+                showControls={false}
+                initialDetectionActive={true}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Camera Display - Developer Mode Only */}
+      {viewMode === "single" && fullscreenCamera && isDeveloperMode ? (
         <Card
           className={`bg-black/40 backdrop-blur-md border-4 ${getTrafficSignalColor(
             cameras.find((c) => c.id === fullscreenCamera)!
@@ -422,11 +501,11 @@ export const CameraGrid = () => {
             />
           </CardContent>
         </Card>
-      ) : (
+      ) : isDeveloperMode ? (
         <div className="grid grid-cols-2 gap-4">
           {cameras.map((camera) => (
             <Card
-              key={camera.id}
+              key={`camera-card-${camera.id}`}
               className={`bg-black/40 backdrop-blur-md border-4 ${getTrafficSignalColor(
                 camera
               )}`}
@@ -451,29 +530,11 @@ export const CameraGrid = () => {
                       </Badge>
                     )}
                   </div>
-                  <div className="flex gap-2">
-                    {camera.isActive ? (
-                      <Button
-                        onClick={() => stopCamera(camera.id)}
-                        variant="destructive"
-                      >
-                        <Square className="h-4 w-4 mr-2" />
-                        Stop Detection
-                      </Button>
-                    ) : (
-                      <Button
-                        onClick={() => handleStatusChange(camera.id, true)}
-                        className="bg-green-600 hover:bg-green-700"
-                      >
-                        <Play className="h-4 w-4 mr-2" />
-                        Start Detection
-                      </Button>
-                    )}
-                  </div>
                 </CardTitle>
               </CardHeader>
               <CardContent className="p-2">
                 <WebcamCapture
+                  key={`webcam-dev-${camera.id}`}
                   cameraId={camera.id}
                   onDetectionUpdate={(predictions) =>
                     handleDetectionUpdate(camera.id, predictions)
@@ -496,6 +557,28 @@ export const CameraGrid = () => {
                 </div>
               </CardContent>
             </Card>
+          ))}
+        </div>
+      ) : null}
+
+      {/* Fallback for User Mode when view mode is single */}
+      {viewMode === "single" && fullscreenCamera && !isDeveloperMode && (
+        <div className="grid grid-cols-2 gap-4 h-screen">
+          {cameras.map((camera) => (
+            <div
+              key={camera.id}
+              className={`relative border-4 ${getTrafficSignalColor(camera)}`}
+            >
+              <WebcamCapture
+                cameraId={camera.id}
+                onDetectionUpdate={(predictions) =>
+                  handleDetectionUpdate(camera.id, predictions)
+                }
+                onStatusChange={(isActive) =>
+                  handleStatusChange(camera.id, isActive)
+                }
+              />
+            </div>
           ))}
         </div>
       )}

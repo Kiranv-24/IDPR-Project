@@ -27,8 +27,8 @@ app.add_middleware(
 # Roboflow configuration
 ROBOFLOW_CONFIG = {
     1: {  # Lane 1
-        'model_url': 'https://detect.roboflow.com/idp-qwteg/2',
-        'api_key': 'ExruF1SjptGtjyzU1rAc',
+        'model_url': 'https://detect.roboflow.com/idp-kxvaq/1',
+        'api_key': 'jIpN9dHCZm9o5Wrr4PIu',
     },
     2: {  # Lane 2
         'model_url': 'https://detect.roboflow.com/my-first-project-zx0el/1',
@@ -39,8 +39,8 @@ ROBOFLOW_CONFIG = {
         'api_key': 'EcJhVnWcabDRAj2MdLlD',
     },
     4: {  # Lane 4 (same as Lane 1 for now)
-        'model_url': 'https://detect.roboflow.com/my-first-project-zx0el/1',
-        'api_key': 'ckQZ0vm1NHyF5mzEt0wB',
+        'model_url': 'https://detect.roboflow.com/traffic-management-system-nlheu/1',
+        'api_key': 'a1gobndnlMtcrUEtF6GX',
     },
 }
 

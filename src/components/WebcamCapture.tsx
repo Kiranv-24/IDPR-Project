@@ -151,7 +151,7 @@ export const WebcamCapture = ({
 
   // Ensure video plays when stream is set
   useEffect(() => {
-    if (stream && videoRef.current && !videoRef.current.playing) {
+    if (stream && videoRef.current && !videoRef.current.onplaying) {
       videoRef.current.play().catch((err) => {
         console.error(
           `Camera ${cameraId}: Error playing video after stream set:`,
